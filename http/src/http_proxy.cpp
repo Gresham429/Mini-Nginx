@@ -1,83 +1,23 @@
 #include "http_proxy.h"
 #include "http_parser.h"
 #include <iostream>
+#include <fstream>
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <cstring>
 
-HttpReverseProxy::HttpReverseProxy(const char *TargetHost, int TargetPort, int ProxyPort)
-    : TargetHost_(TargetHost), TargetPort_(TargetPort), ProxyPort_(ProxyPort), ServerSocket_(-1), epoll_fd(-1)
+HttpProxy::HttpProxy(int ProxyPort) : ProxyPort_(ProxyPort), ServerSocket_(-1), epoll_fd(-1)
 {
     Init();
 }
-
-HttpReverseProxy::~HttpReverseProxy()
+HttpProxy::~HttpProxy()
 {
     CleanUp();
 }
 
-void HttpReverseProxy::Start()
-{
-    epoll_event *EpollEvents = (epoll_event *)malloc(sizeof(struct epoll_event) * 50);
-
-    while (true)
-    {
-        // 等待事件
-        int EventsNumber = epoll_wait(epoll_fd, EpollEvents, 50, -1);
-        if (EventsNumber == -1)
-        {
-            std::cerr << "Epoll wait error" << std::endl;
-            exit(EXIT_FAILURE);
-        }
-
-        for (int i = 0; i < EventsNumber; ++i)
-        {
-            int fd = EpollEvents[i].data.fd;
-
-            if (fd == ServerSocket_)
-            {
-                // 有新的客户端请求连接
-                struct sockaddr_in ClientAddr;
-                socklen_t ClientLen = sizeof(ClientAddr);
-                int ClientSocket = accept(ServerSocket_, (struct sockaddr *)&ClientAddr, &ClientLen);
-                if (ClientSocket < 0)
-                {
-                    std::cerr << "Accept from client error" << std::endl;
-                    continue;
-                }
-
-                // 将新的 client socket 加入到 epoll 监听
-                struct epoll_event ClientEvent;
-                ClientEvent.events = EPOLLIN;
-                ClientEvent.data.fd = ClientSocket;
-                if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, ClientSocket, &ClientEvent) == -1)
-                {
-                    std::cerr << "Epoll control error in adding client" << std::endl;
-                    close(ClientSocket);
-                }
-            }
-            else
-            {
-                // 处理客户端请求,完成后关闭客户端
-                HandleClientRequest(fd);
-
-                // 从 epoll 监听中删除客户端事件
-                if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL) == -1)
-                {
-                    std::cerr << "Epoll control error in deleting client" << std::endl;
-                }
-
-                close(fd);
-            }
-        }
-    }
-
-    free(EpollEvents);
-}
-
-void HttpReverseProxy::Init()
+void HttpProxy::Init()
 {
     epoll_fd = epoll_create(1);
     if (epoll_fd == -1)
@@ -127,7 +67,7 @@ void HttpReverseProxy::Init()
     std::cout << "Reverse proxy is listening on port " << ProxyPort_ << "..." << std::endl;
 }
 
-void HttpReverseProxy::CleanUp()
+void HttpProxy::CleanUp()
 {
     if (ServerSocket_ >= 0)
         close(ServerSocket_);
@@ -136,7 +76,66 @@ void HttpReverseProxy::CleanUp()
         close(epoll_fd);
 }
 
-void HttpReverseProxy::HandleClientRequest(int ClientSocket)
+void HttpProxy::Start()
+{
+    epoll_event *EpollEvents = (epoll_event *)malloc(sizeof(struct epoll_event) * 50);
+
+    while (true)
+    {
+        // 等待事件
+        int EventsNumber = epoll_wait(epoll_fd, EpollEvents, 50, -1);
+        if (EventsNumber == -1)
+        {
+            std::cerr << "Epoll wait error" << std::endl;
+            exit(EXIT_FAILURE);
+        }
+
+        for (int i = 0; i < EventsNumber; ++i)
+        {
+            int fd = EpollEvents[i].data.fd;
+
+            if (fd == ServerSocket_)
+            {
+                // 有新的客户端请求连接
+                struct sockaddr_in ClientAddr;
+                socklen_t ClientLen = sizeof(ClientAddr);
+                int ClientSocket = accept(ServerSocket_, (struct sockaddr *)&ClientAddr, &ClientLen);
+                if (ClientSocket < 0)
+                {
+                    std::cerr << "Accept from client error" << std::endl;
+                    continue;
+                }
+
+                // 将新的 client socket 加入到 epoll 监听
+                struct epoll_event ClientEvent;
+                ClientEvent.events = EPOLLIN;
+                ClientEvent.data.fd = ClientSocket;
+                if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, ClientSocket, &ClientEvent) == -1)
+                {
+                    std::cerr << "Epoll control error in adding client" << std::endl;
+                    close(ClientSocket);
+                }
+            }
+            else
+            {
+                // 处理客户端请求,完成后关闭客户端
+                ProxyRequest(fd);
+
+                // 从 epoll 监听中删除客户端事件
+                if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL) == -1)
+                {
+                    std::cerr << "Epoll control error in deleting client" << std::endl;
+                }
+
+                close(fd);
+            }
+        }
+    }
+
+    free(EpollEvents);
+}
+
+void HttpProxy::ProxyRequest(int ClientSocket)
 {
     // 接受来自客户端的消息
     char buffer[1024];
@@ -147,6 +146,18 @@ void HttpReverseProxy::HandleClientRequest(int ClientSocket)
         return;
     }
 
+    // ReverseProxy ReverseProxy_("127.0.0.1", 7000);
+    // ReverseProxy_.ReverseProxyRequest(ClientSocket, buffer, BytesReceived);
+
+    StaticResourcesProxy StaticResourcesProxy_("/home/cxj/test.html");
+    StaticResourcesProxy_.StaticResourcesProxyRequest(ClientSocket);
+}
+
+ReverseProxy::ReverseProxy(const char *TargetHost, int TargetPort)
+    : TargetHost_(TargetHost), TargetPort_(TargetPort) {}
+
+void ReverseProxy::ReverseProxyRequest(int ClientSocket, const char *buffer, const int BytesReceived)
+{
     // 创建 socket 连接到目标服务器
     int TargetSocket = socket(AF_INET, SOCK_STREAM, 0);
     if (TargetSocket < 0)
@@ -170,7 +181,7 @@ void HttpReverseProxy::HandleClientRequest(int ClientSocket)
 
     // 解析 http 报文
     std::string ClientRequest(buffer);
-    
+
     std::cout << "从客户端接收到的报文：" << std::endl;
     std::cout << ClientRequest << std::endl;
 
@@ -183,15 +194,12 @@ void HttpReverseProxy::HandleClientRequest(int ClientSocket)
     std::cout << "解析转发的报文：" << std::endl;
     std::cout << request;
 
-
     // 转发到目标服务器
     send(TargetSocket, request.c_str(), BytesReceived, 0);
-    std::cout << "我发送了请求" << std::endl;
 
     // 接收目标服务器的响应并且转发给客户端
     char response[1024];
     int ResponseReceived = recv(TargetSocket, response, sizeof(response), 0);
-    std::cout << "我收到了响应" << std::endl;
 
     if (ResponseReceived <= 0)
     {
@@ -201,6 +209,37 @@ void HttpReverseProxy::HandleClientRequest(int ClientSocket)
     }
 
     send(ClientSocket, response, sizeof(response), 0);
-    
+
     close(TargetSocket);
+}
+
+StaticResourcesProxy::StaticResourcesProxy(const std::string FilePath) : FilePath_(FilePath) {}
+
+void StaticResourcesProxy::StaticResourcesProxyRequest(int ClientSocket)
+{
+    std::ifstream File(FilePath_, std::ios::binary);
+    if (File)
+    {
+        std::string response;
+        response += "HTTP/1.1 200 OK\r\n";
+        response += "Content-Type: text/html\r\n";
+        response += "Connection: close\r\n";
+        response += "\r\n";
+
+        send(ClientSocket, response.c_str(), response.size(), 0);
+
+        char FileBuffer[1024];
+
+        while (!File.eof())
+        {
+            File.read(FileBuffer, sizeof(FileBuffer));
+            send(ClientSocket, FileBuffer, File.gcount(), 0);
+        }
+    }
+    else
+    {
+        // 文件不存在，返回404错误
+        std::string notFoundResponse = "HTTP/1.1 404 Not Found\r\n\r\n";
+        send(ClientSocket, notFoundResponse.c_str(), notFoundResponse.size(), 0);
+    }
 }
