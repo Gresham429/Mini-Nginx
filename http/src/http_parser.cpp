@@ -1,5 +1,6 @@
 #include "http_parser.h"
 #include <iostream>
+#include <regex>
 
 HttpRequestParser::HttpRequestParser(const std::string &HttpRequestText) : HttpRequestText_(HttpRequestText) {}
 
@@ -60,4 +61,26 @@ void HttpRequestParser::ParseHeaders(HttpRequest &request)
 
         HeaderStart = HeaderEnd + 2; // 跳过换行符
     }
+}
+
+std::string HttpRequestParser::ToHttpRequestText(HttpRequest &request)
+{
+    std::string HttpRequestText =
+        "Request URL: " + request.url + "\r\n" +
+        "Request Method: " + request.method + "\r\n\r\n" +
+        "Request Header:\r\n";
+
+    for (const auto &header : request.headers)
+    {
+        HttpRequestText += header.first + ": " + header.second + "\r\n";
+    }
+
+    return HttpRequestText;
+}
+
+void HttpRequestParser::ReplaceHost(std::string &url, const std::string &newHost)
+{
+    // 使用正则表达式查找 "http://" 后面的部分并替换为新主机名
+    std::regex regex("http[s]?://[^/]+");
+    url = std::regex_replace(url, regex, newHost);
 }

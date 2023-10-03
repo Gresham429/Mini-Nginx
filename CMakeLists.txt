@@ -7,6 +7,9 @@ project(Mini-Nginx)
 # 指定C++标准
 set(CMAKE_CXX_STANDARD 14)
 
+# 设置 Release 模式
+set(CMAKE_BUILD_TYPE Release)
+
 # 添加其他编译选项，如优化等
 # target_compile_options(Mini-Nginx PRIVATE -O2)
 
@@ -14,6 +17,7 @@ set(CMAKE_CXX_STANDARD 14)
 add_executable(Mini-Nginx
     main.cpp
     http/src/http_parser.cpp
+    http/src/http_proxy.cpp
 )
 
 # 添加包含目录

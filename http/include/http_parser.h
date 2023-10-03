@@ -17,7 +17,14 @@ class HttpRequestParser
 public:
     HttpRequestParser(const std::string &HttpRequestText);
 
+    // 解析Http报文
     HttpRequest Parse();
+
+    // 将请求转换成报文
+    std::string ToHttpRequestText(HttpRequest &request);
+
+    // 替换Host
+    void ReplaceHost(std::string &input, const std::string &newHost);
 
 private:
     std::string HttpRequestText_;
