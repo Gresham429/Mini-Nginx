@@ -10,12 +10,10 @@ set(CMAKE_CXX_STANDARD 14)
 # 设置 Release 模式
 set(CMAKE_BUILD_TYPE Release)
 
-# 添加其他编译选项，如优化等
-# target_compile_options(Mini-Nginx PRIVATE -O2)
-
 # 添加执行文件
 add_executable(Mini-Nginx
     main.cpp
+    core/src/conf_parser.cpp
     http/src/http_parser.cpp
     http/src/http_proxy.cpp
 )
