@@ -79,7 +79,7 @@ void HttpProxy::Init()
             exit(EXIT_FAILURE);
         }
 
-        std::cout << "Reverse proxy is listening on port " << it.first << "..." << std::endl;
+        std::cout << "Proxy is listening on port " << it.first << "..." << std::endl;
     }
 }
 
@@ -224,7 +224,7 @@ void HttpProxy::MatchServer(int ClientSocket, const char *buffer)
     else
     {
         // 错误处理
-        std::cerr << "Invalid access port" << std::endl;
+        std::cerr << "Invalid access port: " << Port << std::endl;
     }
 }
 
@@ -538,9 +538,6 @@ void ReverseProxy::ReverseProxyRequest(int ClientSocket, const char *buffer, Ser
     // 解析 http 报文
     std::string ClientRequest(buffer);
 
-    // std::cout << "从客户端接收到的报文：" << std::endl;
-    // std::cout << ClientRequest << std::endl;
-
     // 替换请求行中的 URL
     HttpRequestParser parser(ClientRequest);
     HttpRequest request_temp_ = parser.Parse();
@@ -555,14 +552,13 @@ void ReverseProxy::ReverseProxyRequest(int ClientSocket, const char *buffer, Ser
 
     std::string request = parser.ToHttpRequestText(request_temp_);
 
-    // std::cout << "解析转发的报文：" << std::endl;
-    // std::cout << request;
+    std::cout << request << std::endl;
 
     // 转发到目标服务器
     send(TargetSocket, request.c_str(), strlen(request.c_str()), 0);
 
     // 接收目标服务器的响应并且转发给客户端
-    char response[4096];
+    char response[4096] = {'\0'};
     int ResponseReceived = recv(TargetSocket, response, sizeof(response), 0);
 
     int StatusCode = GetHttpResponseStatusCode(response);
@@ -617,7 +613,7 @@ StaticResourcesProxy::StaticResourcesProxy(const std::string FilePath) : FilePat
 void StaticResourcesProxy::StaticResourcesProxyRequest(int ClientSocket, ServerBlock Server, HttpRequest requestFromClient)
 {
     std::ifstream File(FilePath_, std::ios::binary);
-    if (File)
+    if (File.is_open())
     {
         std::string response;
         response += "HTTP/1.1 200 OK\r\n";
@@ -627,13 +623,15 @@ void StaticResourcesProxy::StaticResourcesProxyRequest(int ClientSocket, ServerB
 
         send(ClientSocket, response.c_str(), response.size(), 0);
 
-        char FileBuffer[4096];
+        char FileBuffer[1024] = {'\0'};
 
         while (!File.eof())
         {
             File.read(FileBuffer, sizeof(FileBuffer));
             send(ClientSocket, FileBuffer, File.gcount(), 0);
         }
+
+        File.close();
 
         LogMap[Server.access_log].LogAcess(INFO, requestFromClient, response.c_str());
     }

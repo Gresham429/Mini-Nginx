@@ -26,20 +26,20 @@ void HttpRequestParser::ParseRequestLine(HttpRequest &request)
     size_t RequestLineEnd = HttpRequestText_.find("\r\n\r\n") + 2;
     std::string RequestLine = HttpRequestText_.substr(0, RequestLineEnd);
 
-    std::regex MethodRegex("Request Method: (\\w+)\\s*\\r?");
-    std::regex URLRegex("Request URL: (https?://\\S+)\\s*\\r?"); // 修改正则表达式以匹配 "https" 或 "http"
+    std::regex MethodRegex("Request Method: (\\w+)\\s*\\r?", std::regex_constants::icase);
+    std::regex URLRegex("Request URL: (https?://\\S+)\\s*\\r?", std::regex_constants::icase); // 修改正则表达式以匹配 "https" 或 "http"
 
     std::smatch MethodMatch;
     std::smatch URLMatch;
 
-    if (std::regex_search(RequestLine, MethodMatch, MethodRegex))
-    {
-        request.method = MethodMatch[1];
-    }
-
     if (std::regex_search(RequestLine, URLMatch, URLRegex))
     {
         request.url = URLMatch[1];
+    }
+
+    if (std::regex_search(RequestLine, MethodMatch, MethodRegex))
+    {
+        request.method = MethodMatch[1];
     }
 }
 
@@ -80,6 +80,8 @@ std::string HttpRequestParser::ToHttpRequestText(HttpRequest &request)
     {
         HttpRequestText += header.first + ": " + header.second + "\r\n";
     }
+
+    HttpRequestText += "\r\n";
 
     return HttpRequestText;
 }
@@ -198,7 +200,7 @@ std::string HttpRequestParser::ParsePort(std::string url)
             {
                 domain = url.substr(start);
             }
-
+            
             size_t pos = domain.find(":");
 
             if (pos != std::string::npos)
