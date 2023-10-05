@@ -470,7 +470,7 @@ void HttpProxy::LoadBalancingIPHash(std::vector<std::string> Servers, std::strin
     {
         char ClientIP[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &(clientAddr.sin_addr), ClientIP, INET_ADDRSTRLEN);
-        
+
         // 使用哈希函数计算客户端IP地址的哈希值
         std::hash<char *> HashFunction;
         size_t HashValue = HashFunction(ClientIP);
@@ -552,8 +552,6 @@ void ReverseProxy::ReverseProxyRequest(int ClientSocket, const char *buffer, Ser
 
     std::string request = parser.ToHttpRequestText(request_temp_);
 
-    std::cout << request << std::endl;
-
     // 转发到目标服务器
     send(TargetSocket, request.c_str(), strlen(request.c_str()), 0);
 
@@ -621,14 +619,16 @@ void StaticResourcesProxy::StaticResourcesProxyRequest(int ClientSocket, ServerB
         response += "Connection: close\r\n";
         response += "\r\n";
 
+        char FileBuffer[1024];
+        int bytesRead = 0;
+
+        // 发送响应头
         send(ClientSocket, response.c_str(), response.size(), 0);
 
-        char FileBuffer[1024] = {'\0'};
-
-        while (!File.eof())
+        // 发送文件内容
+        while ((bytesRead = File.readsome(FileBuffer, sizeof(FileBuffer))) > 0)
         {
-            File.read(FileBuffer, sizeof(FileBuffer));
-            send(ClientSocket, FileBuffer, File.gcount(), 0);
+            send(ClientSocket, FileBuffer, bytesRead, 0);
         }
 
         File.close();
