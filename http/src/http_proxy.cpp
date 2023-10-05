@@ -7,16 +7,19 @@
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <unistd.h>
+#include <netinet/in.h>
 #include <arpa/inet.h>
 #include <regex>
 #include <map>
 #include <vector>
 #include <string>
 #include <cstring>
+#include <random>
+#include <functional>
 
 extern std::map<std::string, Logger> LogMap;
 
-HttpProxy::HttpProxy(std::map<std::string, std::vector<ServerBlock>> ServerMap) : ServerMap_(ServerMap), epoll_fd(-1)
+HttpProxy::HttpProxy(std::map<std::string, std::vector<ServerBlock>> ServerMap, std::vector<upstream> Upstreams) : ServerMap_(ServerMap), Upstreams_(Upstreams), epoll_fd(-1)
 {
     Init();
 }
@@ -349,6 +352,12 @@ void HttpProxy::HandleRequest(int ClientSocket, HttpRequest Request, HttpRequest
 {
     if (!location.proxy_pass.empty())
     {
+        for (const auto Upstream : Upstreams_)
+        {
+            if (location.proxy_pass.find(Upstream.host) != std::string::npos)
+                location.proxy_pass = LoadBalancingGetProxyPass(Upstream, ClientSocket);
+        }
+
         // 反向代理请求到指定的目标服务器
         std::string TargetIP;
         int TargetPort;
@@ -376,6 +385,99 @@ void HttpProxy::HandleRequest(int ClientSocket, HttpRequest Request, HttpRequest
         StaticResourcesProxy StaticResourcesProxy_(FileName);
         StaticResourcesProxy_.StaticResourcesProxyRequest(ClientSocket, Server, requestFromClient);
         return;
+    }
+}
+
+// 负载均衡算法，选择相应的代理 ip 和 port
+std::string HttpProxy::LoadBalancingGetProxyPass(upstream Upstream, int ClientSocket)
+{
+    std::string SelectedProxyPass;
+
+    switch (Upstream.method)
+    {
+    case RoundRobin:
+        LoadBalancingRoundRobin(Upstream.servers, SelectedProxyPass);
+        break;
+    case WeightedRoundRobin:
+        LoadBalancingWeightRoundRobin(Upstream.servers, SelectedProxyPass);
+        break;
+    case IPHash:
+        LoadBalancingIPHash(Upstream.servers, SelectedProxyPass, ClientSocket);
+        break;
+    }
+
+    return SelectedProxyPass;
+}
+
+// 轮询
+void HttpProxy::LoadBalancingRoundRobin(std::vector<std::string> Servers, std::string &ProxyPass)
+{
+    static int index = 0;
+
+    ProxyPass = Servers[index];
+
+    index = (index + 1) % Servers.size();
+}
+
+// 加权轮询
+void HttpProxy::LoadBalancingWeightRoundRobin(std::vector<std::string> Servers, std::string &ProxyPass)
+{
+    std::vector<std::pair<std::string, int>> WeightedServers;
+    int totalWeight = 0; // 计算总权重
+
+    for (const auto &server : Servers)
+    {
+        size_t weightPos = server.find(" weight=");
+        if (weightPos != std::string::npos)
+        {
+            int weight = std::stoi(server.substr(weightPos + 8));
+            totalWeight += weight;
+            WeightedServers.emplace_back(server.substr(0, weightPos), weight);
+        }
+        else
+        {
+            totalWeight += 1;
+            WeightedServers.emplace_back(server, 1);
+        }
+    }
+
+    // 生成随机数来选择服务器
+    static std::mt19937 generator(std::random_device{}());
+    std::uniform_int_distribution<int> distribution(1, totalWeight);
+    int randomNumber = distribution(generator);
+
+    // 根据随机数和权重选择服务器
+    int CurrentWeight = 0;
+    for (const auto &Server : WeightedServers)
+    {
+        CurrentWeight += Server.second;
+        if (randomNumber <= CurrentWeight)
+        {
+            ProxyPass = Server.first;
+            break;
+        }
+    }
+}
+
+// IP哈希
+void HttpProxy::LoadBalancingIPHash(std::vector<std::string> Servers, std::string &ProxyPass, int ClientSocket)
+{
+    // 假设 clientSocket 是已连接的套接字
+    struct sockaddr_in clientAddr;
+    socklen_t AddrLen = sizeof(clientAddr);
+
+    if (getpeername(ClientSocket, (struct sockaddr *)&clientAddr, &AddrLen) == 0)
+    {
+        char ClientIP[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &(clientAddr.sin_addr), ClientIP, INET_ADDRSTRLEN);
+        
+        // 使用哈希函数计算客户端IP地址的哈希值
+        std::hash<char *> HashFunction;
+        size_t HashValue = HashFunction(ClientIP);
+
+        // 使用哈希值来选择服务器
+        size_t ServerIndex = HashValue % Servers.size();
+        ProxyPass = Servers[ServerIndex];
     }
 }
 
@@ -565,11 +667,11 @@ void ExtractIpPort(const std::string &ipPortStr, std::string &ip, int &port)
     else
     {
         // 如果未找到 ':'，可以添加适当的错误处理
-        std::cerr << "Invalid IP:Port format." << std::endl;
+        std::cerr << "Invalid IP:Port format in proxy_pass, set port = 80" << std::endl;
         ip = ipPortStr;
         if (!IsIPAddress(ip))
             ip = ResolveDomainToIP(ip);
-        port = 8000;
+        port = 80;
     }
 }
 

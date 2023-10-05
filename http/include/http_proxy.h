@@ -1,18 +1,18 @@
 #ifndef HTTP_PROXY_H
 #define HTTP_PROXY_H
 
+#include "conf_parser.h"
 #include "http_parser.h"
 #include <string>
 #include <iostream>
 #include <map>
 #include <vector>
 #include <regex>
-#include "conf_parser.h"
 
 class HttpProxy
 {
 public:
-    HttpProxy(std::map<std::string, std::vector<ServerBlock>> ServerMap);
+    HttpProxy(std::map<std::string, std::vector<ServerBlock>> ServerMap, std::vector<upstream> Upstreams);
 
     ~HttpProxy();
 
@@ -22,6 +22,7 @@ public:
 private:
     std::map<std::string, std::vector<ServerBlock>> ServerMap_;
     std::vector<int> ServerSockets_;
+    std::vector<upstream> Upstreams_;
     int epoll_fd;
 
     // 初始化
@@ -41,6 +42,18 @@ private:
 
     // 处理请求是反向代理还是静态资源代理
     void HandleRequest(int ClientSocket, HttpRequest Request, HttpRequest requestFromClient, LocationBlock location, HttpRequestParser parser, ServerBlock Server);
+
+    // 负载均衡算法，选择相应的代理 ip 和 port
+    std::string LoadBalancingGetProxyPass(upstream Upstream, int ClientSocket);
+
+    // 轮询
+    void LoadBalancingRoundRobin(std::vector<std::string> Servers, std::string &ProxyPass);
+
+    // 加权轮询
+    void LoadBalancingWeightRoundRobin(std::vector<std::string> Servers, std::string &ProxyPass);
+
+    // IP哈希
+    void LoadBalancingIPHash(std::vector<std::string> Servers, std::string &ProxyPass, int ClientSocket);
 
     // 精确匹配
     bool MatchServerNameExact(const std::string &pattern, const std::string &HostName);

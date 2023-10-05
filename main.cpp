@@ -10,7 +10,10 @@ std::map<std::string, Logger> LogMap;
 
 int main()
 {
-    std::vector<ServerBlock> Servers = ParserConf("/home/cxj/MiniNginx.conf");
+    http HttpServers = ParserConf("/home/cxj/MiniNginx.conf");
+
+    std::vector<ServerBlock> Servers = HttpServers.Servers;
+    std::vector<upstream> Upstreams = HttpServers.Upstreams;
 
     std::map<std::string, std::vector<ServerBlock>> ServerMap;
 
@@ -37,12 +40,12 @@ int main()
         auto error_it = LogMap.find(Server.error_log);
         if (error_it == LogMap.end())
         {
-            Logger ErrorLogger(Server.access_log);
+            Logger ErrorLogger(Server.error_log);
             LogMap[Server.error_log] = ErrorLogger;
         }
     }
 
-    HttpProxy HttpProxy_(ServerMap);
+    HttpProxy HttpProxy_(ServerMap, Upstreams);
     HttpProxy_.Start();
 
     return 0;

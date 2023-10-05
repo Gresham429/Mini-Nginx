@@ -8,11 +8,14 @@
 #include <regex>
 
 // 解析配置文件
-std::vector<ServerBlock> ParserConf(const std::string &FileName)
+http ParserConf(const std::string &FileName)
 {
+    http HttpServers;
+    std::vector<upstream> upstreams;
     std::vector<ServerBlock> ServerBlocks;
     ServerBlock CurrentServerBlock;
     LocationBlock CurrentLocationBlock;
+    upstream CurrentUpstream;
 
     std::ifstream ConfigFile(FileName);
     if (!ConfigFile.is_open())
@@ -24,6 +27,7 @@ std::vector<ServerBlock> ParserConf(const std::string &FileName)
     std::string line;
     bool InsideLocationBlock = false;
     bool InsideServerBlock = false;
+    bool InsideUpstream = false;
     while (std::getline(ConfigFile, line))
     {
         // 去除首尾空格
@@ -43,6 +47,9 @@ std::vector<ServerBlock> ParserConf(const std::string &FileName)
 
         std::regex LocationRegex("location\\s+(.*?)\\s*\\{");
         std::smatch LocationMatch;
+
+        std::regex UpstreamRegex("upstream\\s+(.*?)\\s*\\{");
+        std::smatch UpstreamMatch;
         // 如果包含左花括号 '{'，说明进入了一个配置块
         if (line.find("{") != std::string::npos)
         {
@@ -61,6 +68,50 @@ std::vector<ServerBlock> ParserConf(const std::string &FileName)
                 CurrentLocationBlock.path = LocationMatch[1];
                 InsideLocationBlock = true;
             }
+            else if (std::regex_match(line, UpstreamMatch, UpstreamRegex))
+            {
+                CurrentUpstream = upstream();
+                CurrentUpstream.host = UpstreamMatch[1];
+                InsideUpstream = true;
+            }
+            continue;
+        }
+
+        // 如果包含右花括号 '}'，说明结束了一个配置块
+        if (line == "}")
+        {
+            if (InsideUpstream)
+            {
+                upstreams.push_back(CurrentUpstream);
+                InsideUpstream = false;
+            }
+            else if (InsideServerBlock && InsideLocationBlock)
+            {
+                CurrentServerBlock.locations.push_back(CurrentLocationBlock);
+                InsideLocationBlock = false;
+            }
+            else if (InsideServerBlock && !InsideLocationBlock)
+            {
+                ServerBlocks.push_back(CurrentServerBlock);
+                InsideServerBlock = false;
+            }
+        }
+
+        if (InsideUpstream)
+        {
+            if (line.find("ip_hash") != std::string::npos)
+            {
+                CurrentUpstream.method = IPHash;
+                continue;
+            }
+            else if(line.find("weight") != std::string::npos)
+            {
+                CurrentUpstream.method = WeightedRoundRobin;
+            }
+
+            // 去掉 "server "
+            CurrentUpstream.servers.push_back(line.substr(7));
+
             continue;
         }
 
@@ -106,24 +157,12 @@ std::vector<ServerBlock> ParserConf(const std::string &FileName)
                 CurrentLocationBlock.index = line.substr(6); // 去掉 "index " 部分
             }
         }
-
-        // 如果包含右花括号 '}'，说明结束了一个配置块
-        if (line == "}")
-        {
-            if (InsideServerBlock && InsideLocationBlock)
-            {
-                CurrentServerBlock.locations.push_back(CurrentLocationBlock);
-                InsideLocationBlock = false;
-            }
-            else if (InsideServerBlock && !InsideLocationBlock)
-            {
-                ServerBlocks.push_back(CurrentServerBlock);
-                InsideServerBlock = false;
-            }
-        }
     }
 
     ConfigFile.close();
 
-    return ServerBlocks;
+    HttpServers.Servers = ServerBlocks;
+    HttpServers.Upstreams = upstreams;
+
+    return HttpServers;
 }

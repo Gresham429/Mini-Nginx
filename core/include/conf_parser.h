@@ -4,6 +4,13 @@
 #include <string>
 #include <vector>
 
+enum Method
+{
+    RoundRobin,
+    WeightedRoundRobin,
+    IPHash
+};
+
 struct LocationBlock
 {
     std::string path;
@@ -28,6 +35,22 @@ struct ServerBlock
         : listen("80"), access_log("/home/cxj/log/access.log"), error_log("/home/cxj/log/error.log") {}
 };
 
-std::vector<ServerBlock> ParserConf(const std::string &FileName);
+struct upstream
+{
+    std::string host;
+    std::vector<std::string> servers;
+    Method method;
+
+    upstream()
+        : method(RoundRobin) {}
+};
+
+struct http
+{
+    std::vector<ServerBlock> Servers;
+    std::vector<upstream> Upstreams;
+};
+
+http ParserConf(const std::string &FileName);
 
 #endif

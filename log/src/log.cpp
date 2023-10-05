@@ -47,17 +47,17 @@ void Logger::LogAcess(LogLevel Level, const HttpRequest Request, const char *Res
     char timestamp[20];
     std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &tm);
 
-    LogFileStream_ << "[" << timestamp << "] [" << levelStr << "] " << Request.method << " " << Request.url << std::endl;
+    LogFileStream_ << "[" << timestamp << "] [" << levelStr << "] " << Request.method << " " << Request.url << std::endl << "\t\t\t";
     std::cout << "[" << timestamp << "] [" << levelStr << "] " << Request.method << " " << Request.url << std::endl;
     for (const auto it : Request.headers)
     {
-        LogFileStream_ << it.first << " " << it.second << " | ";
+        LogFileStream_ << it.first << " : " << it.second << " | ";
     }
     LogFileStream_ << std::endl;
 
     int StatusCode = GetHttpResponseStatusCode(Response);
 
-    LogFileStream_ << "Http response status code: " << StatusCode << std::endl;
+    LogFileStream_ << "\t\t\tHttp response status code: " << StatusCode << std::endl;
 
     LogFileStream_.flush();
 }
