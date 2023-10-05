@@ -16,6 +16,7 @@ add_executable(Mini-Nginx
     core/src/conf_parser.cpp
     http/src/http_parser.cpp
     http/src/http_proxy.cpp
+    log/src/log.cpp
 )
 
 # 添加包含目录
@@ -23,4 +24,5 @@ target_include_directories(Mini-Nginx
     PRIVATE
     core/include
     http/include
+    log/include
 )

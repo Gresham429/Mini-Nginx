@@ -40,7 +40,7 @@ private:
     void MatchLocation(int ClientSocket, HttpRequest Request, ServerBlock Server, HttpRequestParser parser);
 
     // 处理请求是反向代理还是静态资源代理
-    void HandleRequest(int ClientSocket, HttpRequest Request, LocationBlock location, HttpRequestParser parser);
+    void HandleRequest(int ClientSocket, HttpRequest Request, HttpRequest requestFromClient, LocationBlock location, HttpRequestParser parser, ServerBlock Server);
 
     // 精确匹配
     bool MatchServerNameExact(const std::string &pattern, const std::string &HostName);
@@ -58,7 +58,7 @@ public:
     ReverseProxy(const char *TargetHost, int TargetPort, std::map<std::string, std::string> Headers);
 
     // 处理客户端反向代理请求
-    void ReverseProxyRequest(int ClientSocket, const char *buffer);
+    void ReverseProxyRequest(int ClientSocket, const char *buffer, ServerBlock Server, HttpRequest requestFromClient);
 
 private:
     std::map<std::string, std::string> Headers_;
@@ -72,7 +72,7 @@ public:
     StaticResourcesProxy(const std::string FilePath);
 
     // 处理客户端文件请求信息
-    void StaticResourcesProxyRequest(int ClientSocket);
+    void StaticResourcesProxyRequest(int ClientSocket, ServerBlock Server, HttpRequest requestFromClient);
 
 private:
     const std::string FilePath_;

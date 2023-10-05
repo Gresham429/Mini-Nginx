@@ -1,6 +1,7 @@
 #include "http_proxy.h"
 #include "http_parser.h"
 #include "conf_parser.h"
+#include "log.h"
 #include <iostream>
 #include <fstream>
 #include <sys/socket.h>
@@ -12,6 +13,8 @@
 #include <vector>
 #include <string>
 #include <cstring>
+
+extern std::map<std::string, Logger> LogMap;
 
 HttpProxy::HttpProxy(std::map<std::string, std::vector<ServerBlock>> ServerMap) : ServerMap_(ServerMap), epoll_fd(-1)
 {
@@ -151,7 +154,7 @@ void HttpProxy::Start()
 void HttpProxy::ProxyRequest(int ClientSocket)
 {
     // 接受来自客户端的消息
-    char buffer[1024] = {'\0'};
+    char buffer[4096] = {'\0'};
     int BytesReceived = recv(ClientSocket, buffer, sizeof(buffer), 0);
     if (BytesReceived <= 0)
     {
@@ -225,13 +228,15 @@ void HttpProxy::MatchServer(int ClientSocket, const char *buffer)
 void HttpProxy::MatchLocation(int ClientSocket, HttpRequest Request, ServerBlock Server, HttpRequestParser parser)
 {
     std::string URL = parser.ParseURL(Request.url);
+    HttpRequest requestFromClient = Request;
 
     LocationBlock SelectedLocation;
 
     // 优先级从高到低排序
     std::vector<LocationBlock> sortedLocations = Server.locations;
 
-    std::sort(sortedLocations.begin(), sortedLocations.end(), [](const LocationBlock &a, const LocationBlock &b) {
+    std::sort(sortedLocations.begin(), sortedLocations.end(), [](const LocationBlock &a, const LocationBlock &b)
+              {
         // 根据优先级排序，例如，"=" 最高，"^~" 次之，然后是 "~" 和 "~*"
         // 这里可以根据你的需求调整优先级顺序
         std::map<std::string, int> priorityMap = {{"= ", 0}, {"^~", 1}, {"~ ", 2}, {"~*", 2}, {"/", 3}};
@@ -254,8 +259,7 @@ void HttpProxy::MatchLocation(int ClientSocket, HttpRequest Request, ServerBlock
         {
             // 否则按优先级排序(注意把正则匹配最后的一个匹配往前放)
             return priorityA <= priorityB;
-        }
-    });
+        } });
 
     for (const auto &location : sortedLocations)
     {
@@ -292,7 +296,7 @@ void HttpProxy::MatchLocation(int ClientSocket, HttpRequest Request, ServerBlock
                 std::regex regex(path);
                 if (std::regex_search(URL, regex))
                 {
-                   // 使用正则表达式替换已匹配的部分为空字符串
+                    // 使用正则表达式替换已匹配的部分为空字符串
                     URL = std::regex_replace(URL, regex, "");
                     SelectedLocation = location;
                     break; // 匹配成功，退出循环
@@ -332,16 +336,16 @@ void HttpProxy::MatchLocation(int ClientSocket, HttpRequest Request, ServerBlock
 
     if (SelectedLocation.path.empty())
     {
-        std::cerr << "Failed to select location" << std::endl;
+        LogMap[Server.error_log].LogError(ERROR, "Failed to select location");
         return;
     }
 
     parser.ReplaceURL(Request.url, URL);
 
-    HandleRequest(ClientSocket, Request, SelectedLocation, parser);
+    HandleRequest(ClientSocket, Request, requestFromClient, SelectedLocation, parser, Server);
 }
 
-void HttpProxy::HandleRequest(int ClientSocket, HttpRequest Request, LocationBlock location, HttpRequestParser parser)
+void HttpProxy::HandleRequest(int ClientSocket, HttpRequest Request, HttpRequest requestFromClient, LocationBlock location, HttpRequestParser parser, ServerBlock Server)
 {
     if (!location.proxy_pass.empty())
     {
@@ -352,7 +356,7 @@ void HttpProxy::HandleRequest(int ClientSocket, HttpRequest Request, LocationBlo
         ExtractIpPort(location.proxy_pass, TargetIP, TargetPort);
         ExtractHeader(Headers, location.proxy_set_header);
         ReverseProxy ReverseProxy_(TargetIP.c_str(), TargetPort, Headers);
-        ReverseProxy_.ReverseProxyRequest(ClientSocket, parser.ToHttpRequestText(Request).c_str());
+        ReverseProxy_.ReverseProxyRequest(ClientSocket, parser.ToHttpRequestText(Request).c_str(), Server, requestFromClient);
     }
     else if (!location.root.empty())
     {
@@ -370,7 +374,7 @@ void HttpProxy::HandleRequest(int ClientSocket, HttpRequest Request, LocationBlo
         }
 
         StaticResourcesProxy StaticResourcesProxy_(FileName);
-        StaticResourcesProxy_.StaticResourcesProxyRequest(ClientSocket);
+        StaticResourcesProxy_.StaticResourcesProxyRequest(ClientSocket, Server, requestFromClient);
         return;
     }
 }
@@ -406,13 +410,13 @@ bool HttpProxy::MatchServerNameRegex(const std::string &pattern, const std::stri
 ReverseProxy::ReverseProxy(const char *TargetHost, int TargetPort, std::map<std::string, std::string> Headers)
     : TargetHost_(TargetHost), TargetPort_(TargetPort), Headers_(Headers) {}
 
-void ReverseProxy::ReverseProxyRequest(int ClientSocket, const char *buffer)
+void ReverseProxy::ReverseProxyRequest(int ClientSocket, const char *buffer, ServerBlock Server, HttpRequest requestFromClient)
 {
     // 创建 socket 连接到目标服务器
     int TargetSocket = socket(AF_INET, SOCK_STREAM, 0);
     if (TargetSocket < 0)
     {
-        std::cerr << "Target socket creation error in reverse proxy" << std::endl;
+        LogMap[Server.error_log].LogError(ERROR, "Target socket creation error in reverse proxy");
         return;
     }
 
@@ -424,7 +428,7 @@ void ReverseProxy::ReverseProxyRequest(int ClientSocket, const char *buffer)
 
     if (connect(TargetSocket, (struct sockaddr *)&TargetAddr, sizeof(TargetAddr)) < 0)
     {
-        std::cerr << "Conneet to target proxy server failed" << std::endl;
+        LogMap[Server.error_log].LogError(ERROR, "Conneet to target proxy server failed");
         close(TargetSocket);
         return;
     }
@@ -432,8 +436,8 @@ void ReverseProxy::ReverseProxyRequest(int ClientSocket, const char *buffer)
     // 解析 http 报文
     std::string ClientRequest(buffer);
 
-    std::cout << "从客户端接收到的报文：" << std::endl;
-    std::cout << ClientRequest << std::endl;
+    // std::cout << "从客户端接收到的报文：" << std::endl;
+    // std::cout << ClientRequest << std::endl;
 
     // 替换请求行中的 URL
     HttpRequestParser parser(ClientRequest);
@@ -449,19 +453,54 @@ void ReverseProxy::ReverseProxyRequest(int ClientSocket, const char *buffer)
 
     std::string request = parser.ToHttpRequestText(request_temp_);
 
-    std::cout << "解析转发的报文：" << std::endl;
-    std::cout << request;
+    // std::cout << "解析转发的报文：" << std::endl;
+    // std::cout << request;
 
     // 转发到目标服务器
     send(TargetSocket, request.c_str(), strlen(request.c_str()), 0);
 
     // 接收目标服务器的响应并且转发给客户端
-    char response[1024];
+    char response[4096];
     int ResponseReceived = recv(TargetSocket, response, sizeof(response), 0);
+
+    int StatusCode = GetHttpResponseStatusCode(response);
+
+    if (StatusCode == 200)
+    {
+        LogMap[Server.access_log].LogAcess(INFO, requestFromClient, response);
+    }
+    else
+    {
+        std::string ErrorMessage = "HTTP/1.1 " + std::to_string(StatusCode) + " ";
+        switch (StatusCode)
+        {
+        case 400:
+            ErrorMessage = "Bad Request";
+            break;
+        case 401:
+            ErrorMessage = "Unauthorized";
+            break;
+        case 403:
+            ErrorMessage = "Forbidden";
+            break;
+        case 404:
+            ErrorMessage = "Not Found";
+            break;
+        case 500:
+            ErrorMessage = "Internal Server Error";
+            break;
+        // 可以根据需要添加其他状态码的描述
+        default:
+            ErrorMessage = "Unknown Error";
+            break;
+        }
+
+        LogMap[Server.error_log].LogError(ERROR, ErrorMessage);
+    }
 
     if (ResponseReceived <= 0)
     {
-        std::cerr << "Received No Response from proxy server" << std::endl;
+        LogMap[Server.error_log].LogError(ERROR, "Received No Response from proxy server");
         close(TargetSocket);
         return;
     }
@@ -473,7 +512,7 @@ void ReverseProxy::ReverseProxyRequest(int ClientSocket, const char *buffer)
 
 StaticResourcesProxy::StaticResourcesProxy(const std::string FilePath) : FilePath_(FilePath) {}
 
-void StaticResourcesProxy::StaticResourcesProxyRequest(int ClientSocket)
+void StaticResourcesProxy::StaticResourcesProxyRequest(int ClientSocket, ServerBlock Server, HttpRequest requestFromClient)
 {
     std::ifstream File(FilePath_, std::ios::binary);
     if (File)
@@ -486,18 +525,21 @@ void StaticResourcesProxy::StaticResourcesProxyRequest(int ClientSocket)
 
         send(ClientSocket, response.c_str(), response.size(), 0);
 
-        char FileBuffer[1024];
+        char FileBuffer[4096];
 
         while (!File.eof())
         {
             File.read(FileBuffer, sizeof(FileBuffer));
             send(ClientSocket, FileBuffer, File.gcount(), 0);
         }
+
+        LogMap[Server.access_log].LogAcess(INFO, requestFromClient, response.c_str());
     }
     else
     {
         // 文件不存在，返回404错误
         std::string notFoundResponse = "HTTP/1.1 404 Not Found\r\n\r\n";
+        LogMap[Server.error_log].LogError(ERROR, notFoundResponse);
         send(ClientSocket, notFoundResponse.c_str(), notFoundResponse.size(), 0);
     }
 }

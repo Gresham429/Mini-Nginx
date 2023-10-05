@@ -32,11 +32,13 @@ void HttpRequestParser::ParseRequestLine(HttpRequest &request)
     std::smatch MethodMatch;
     std::smatch URLMatch;
 
-    if (std::regex_search(RequestLine, MethodMatch, MethodRegex)) {
+    if (std::regex_search(RequestLine, MethodMatch, MethodRegex))
+    {
         request.method = MethodMatch[1];
     }
 
-    if (std::regex_search(RequestLine, URLMatch, URLRegex)) {
+    if (std::regex_search(RequestLine, URLMatch, URLRegex))
+    {
         request.url = URLMatch[1];
     }
 }
@@ -51,7 +53,8 @@ void HttpRequestParser::ParseHeaders(HttpRequest &request)
     while (HeaderStart < HeadersText.length())
     {
         size_t HeaderEnd = HeadersText.find("\r\n", HeaderStart);
-        if (HeaderEnd == std::string::npos) break;
+        if (HeaderEnd == std::string::npos)
+            break;
         std::string HeaderLine = HeadersText.substr(HeaderStart, HeaderEnd - HeaderStart);
 
         size_t Separator = HeaderLine.find(':');
@@ -112,11 +115,11 @@ void HttpRequestParser::ReplaceURL(std::string &URL, const std::string &NewURL)
     size_t StartPos = URL.find("://") + 3;
     size_t pos = URL.find('/', StartPos);
 
-    if (pos != std::string::npos) URL = URL.substr(0, pos);
+    if (pos != std::string::npos)
+        URL = URL.substr(0, pos);
 
     URL += NewURL;
 }
-
 
 // 解析 IP
 std::string HttpRequestParser::ParseHost(std::string url)
@@ -253,4 +256,34 @@ std::string ResolveDomainToIP(const std::string &domain)
     freeaddrinfo(res);
 
     return ipStr;
+}
+
+int GetHttpResponseStatusCode(const char *response)
+{
+    // 将 char* response 转换为 std::string
+    std::string responseStr(response);
+
+    // 查找第一个空格的位置
+    size_t firstSpacePos = responseStr.find(' ');
+
+    // 如果找到空格并且后面还有字符
+    if (firstSpacePos != std::string::npos && firstSpacePos < responseStr.length() - 1)
+    {
+        // 提取状态码部分，状态码通常是三个数字
+        std::string statusCode = responseStr.substr(firstSpacePos + 1, 3);
+
+        // 将状态码字符串转换为整数并返回
+        try
+        {
+            int statusCodeInt = std::stoi(statusCode);
+            return statusCodeInt;
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << "Error converting status code to integer: " << e.what() << std::endl;
+        }
+    }
+
+    // 如果无法提取状态码，返回默认值（例如，-1 表示失败）
+    return -1;
 }

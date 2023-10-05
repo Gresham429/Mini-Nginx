@@ -53,4 +53,7 @@ bool IsIPAddress(const std::string &serverName);
 // 函数用于将域名解析为IP地址
 std::string ResolveDomainToIP(const std::string &domain);
 
+// 解析标准 HTTP response 的状态码
+int GetHttpResponseStatusCode(const char *response);
+
 #endif
