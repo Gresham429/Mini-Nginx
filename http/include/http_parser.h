@@ -29,7 +29,6 @@ public:
     // 替换 URL
     void ReplaceURL(std::string &URL, const std::string &NewURL);
 
-
     // 解析 URL
     std::string ParseURL(std::string url);
 

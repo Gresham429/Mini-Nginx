@@ -10,14 +10,15 @@ std::map<std::string, Logger> LogMap;
 
 int main()
 {
-    http HttpServers = ParserConf("/home/cxj/MiniNginx.conf");
+    std::string filename;
+    std::cout << "请输入配置文件路径：";
+    std::cin >> filename;
 
-    std::vector<ServerBlock> Servers = HttpServers.Servers;
-    std::vector<upstream> Upstreams = HttpServers.Upstreams;
+    http HttpServers = ParserConf(filename);
 
     std::map<std::string, std::vector<ServerBlock>> ServerMap;
 
-    for (const auto &Server : Servers)
+    for (const auto &Server : HttpServers.Servers)
     {
         // 端口归类
         auto it = ServerMap.find(Server.listen);
@@ -45,7 +46,7 @@ int main()
         }
     }
 
-    HttpProxy HttpProxy_(HttpServers.NumWorkers, ServerMap, Upstreams);
+    HttpProxy HttpProxy_(HttpServers.NumWorkers, ServerMap, HttpServers.Upstreams);
     HttpProxy_.Start();
 
     return 0;
