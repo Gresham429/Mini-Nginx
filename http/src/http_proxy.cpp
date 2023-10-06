@@ -16,10 +16,11 @@
 #include <cstring>
 #include <random>
 #include <functional>
+#include <sys/wait.h>
 
 extern std::map<std::string, Logger> LogMap;
 
-HttpProxy::HttpProxy(std::map<std::string, std::vector<ServerBlock>> ServerMap, std::vector<upstream> Upstreams) : ServerMap_(ServerMap), Upstreams_(Upstreams), epoll_fd(-1)
+HttpProxy::HttpProxy(int NumWorkers, std::map<std::string, std::vector<ServerBlock>> ServerMap, std::vector<upstream> Upstreams) : NumWorkers_(NumWorkers), ServerMap_(ServerMap), Upstreams_(Upstreams), epoll_fd_master(-1)
 {
     Init();
 }
@@ -30,8 +31,171 @@ HttpProxy::~HttpProxy()
 
 void HttpProxy::Init()
 {
-    epoll_fd = epoll_create(1);
+    int worker_sock_fd[NumWorkers_];
+
+    for (int i = 0; i < NumWorkers_; ++i)
+    {
+        int sock_fd[2];
+
+        // 创建 socket
+        if (socketpair(AF_UNIX, SOCK_STREAM, 0, sock_fd) == -1)
+        {
+            perror("socketpair");
+            return;
+        }
+
+        pid_t pid = fork();
+        if (pid == 0)
+        {
+            // 在子进程中执行WorkerFunction
+            // 关闭写端
+            close(sock_fd[1]);
+
+            WorkerFunction(i + 1, sock_fd[0]);
+
+            // 关闭读取端
+            close(sock_fd[0]);
+            exit(0); // 子进程结束
+        }
+        else if (pid > 0)
+        {
+            // 在父进程中记录子进程的PID
+            WorkerProcesses.push_back(pid);
+
+            // 保存写端
+            worker_sock_fd[i] = sock_fd[1];
+
+            // 关闭读端
+            close(sock_fd[0]);
+        }
+        else
+        {
+            std::cerr << "Fork failed." << std::endl;
+            return;
+        }
+    }
+
+    worker_sock_fd_.insert(worker_sock_fd_.begin(), worker_sock_fd, worker_sock_fd + sizeof(worker_sock_fd) / sizeof(worker_sock_fd[0]));
+
+    sleep(1);
+
+    std::cout << "Successfully create " << NumWorkers_ << " worker processes." << std::endl;
+}
+
+void HttpProxy::CleanUp()
+{
+    for (auto ServerSocket_ : ServerSockets_)
+    {
+        if (ServerSocket_ >= 0)
+            close(ServerSocket_);
+    }
+
+    if (epoll_fd_master > 0)
+        close(epoll_fd_master);
+}
+
+// Worker进程的函数
+void HttpProxy::WorkerFunction(int workerId, int worker_sock_fd)
+{
+    std::cout << "Worker process " << workerId << " is on working" << std::endl;
+
+    int epoll_fd = epoll_create(1);
     if (epoll_fd == -1)
+    {
+        perror("epoll_create");
+        return;
+    }
+
+    // 添加管道读取端文件描述符到 epoll 监听事件中
+    struct epoll_event event;
+    event.events = EPOLLIN;         // 监听可读事件
+    event.data.fd = worker_sock_fd; // 管道读取端文件描述符
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, worker_sock_fd, &event) == -1)
+    {
+        std::cerr << "epoll_ctl in worker " << workerId << std::endl;
+        return;
+    }
+
+    struct epoll_event EpollEvents[100]; // 声明并初始化EpollEvents
+
+    while (true)
+    {
+        // 等待事件
+        int EventsNumber = epoll_wait(epoll_fd, EpollEvents, 100, -1);
+
+        if (EventsNumber == -1)
+        {
+            std::cerr << "Epoll wait error in worker " << workerId << std::endl;
+            exit(EXIT_FAILURE);
+        }
+
+        for (int i = 0; i < EventsNumber; ++i)
+        {
+            int fd = EpollEvents[i].data.fd;
+
+            if (fd == worker_sock_fd)
+            {
+                // 在Worker进程中接收文件描述符
+                int ClientSocket_fd = -1;
+                char ClientSocket_str[20];
+                struct iovec iov = {ClientSocket_str, sizeof(ClientSocket_str)};
+                struct msghdr msg = {0};
+                msg.msg_iov = &iov;
+                msg.msg_iovlen = 1;
+
+                // 设置msg_control以接收文件描述符
+                char cmsgbuf[CMSG_SPACE(sizeof(int))] = {0};
+                msg.msg_control = cmsgbuf;
+                msg.msg_controllen = sizeof(cmsgbuf);
+
+                if (recvmsg(worker_sock_fd, &msg, 0) == -1)
+                {
+                    std::cerr << "recvmsg error in worker process " << workerId << std::endl;
+                    continue;
+                }
+
+                // 从msg_control中提取文件描述符
+                struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+                if (cmsg != nullptr && cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS)
+                {
+                    ClientSocket_fd = *((int *)CMSG_DATA(cmsg));
+                }
+
+                if (ClientSocket_fd != -1)
+                {
+                    // 将 client socket 加入到 epoll 监听
+                    struct epoll_event ClientEvent;
+                    ClientEvent.events = EPOLLIN;
+                    ClientEvent.data.fd = ClientSocket_fd;
+                    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, ClientSocket_fd, &ClientEvent) == -1)
+                    {
+                        std::cerr << "Epoll control error in adding client" << std::endl;
+                        close(ClientSocket_fd);
+                    }
+                }
+            }
+            else
+            {
+                ProxyRequest(fd);
+
+                // 从 epoll 监听中删除客户端事件
+                if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL) == -1)
+                {
+                    std::cerr << "Epoll control error in deleting client" << std::endl;
+                }
+
+                shutdown(fd, SHUT_WR);
+            }
+        }
+    }
+
+    close(epoll_fd);
+}
+
+void HttpProxy::Start()
+{
+    epoll_fd_master = epoll_create(1);
+    if (epoll_fd_master == -1)
     {
         std::cerr << "Epoll create error" << std::endl;
         exit(EXIT_FAILURE);
@@ -73,7 +237,7 @@ void HttpProxy::Init()
         struct epoll_event ServerEvent;
         ServerEvent.events = EPOLLIN; // 监听可读事件
         ServerEvent.data.fd = ServerSocket_;
-        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, ServerSocket_, &ServerEvent) == -1)
+        if (epoll_ctl(epoll_fd_master, EPOLL_CTL_ADD, ServerSocket_, &ServerEvent) == -1)
         {
             std::cerr << "Epoll control error in adding server socket" << std::endl;
             exit(EXIT_FAILURE);
@@ -81,28 +245,16 @@ void HttpProxy::Init()
 
         std::cout << "Proxy is listening on port " << it.first << "..." << std::endl;
     }
-}
 
-void HttpProxy::CleanUp()
-{
-    for (auto ServerSocket_ : ServerSockets_)
-    {
-        if (ServerSocket_ >= 0)
-            close(ServerSocket_);
-    }
-
-    if (epoll_fd > 0)
-        close(epoll_fd);
-}
-
-void HttpProxy::Start()
-{
     epoll_event *EpollEvents = (epoll_event *)malloc(sizeof(struct epoll_event) * 100);
+
+    int worker_index = 0;
 
     while (true)
     {
         // 等待事件
-        int EventsNumber = epoll_wait(epoll_fd, EpollEvents, 100, -1);
+        int EventsNumber = epoll_wait(epoll_fd_master, EpollEvents, 100, -1);
+
         if (EventsNumber == -1)
         {
             std::cerr << "Epoll wait error" << std::endl;
@@ -125,33 +277,52 @@ void HttpProxy::Start()
                     continue;
                 }
 
-                // 将新的 client socket 加入到 epoll 监听
-                struct epoll_event ClientEvent;
-                ClientEvent.events = EPOLLIN;
-                ClientEvent.data.fd = ClientSocket;
-                if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, ClientSocket, &ClientEvent) == -1)
-                {
-                    std::cerr << "Epoll control error in adding client" << std::endl;
-                    close(ClientSocket);
-                }
-            }
-            else
-            {
-                // 处理客户端请求,完成后关闭客户端
-                ProxyRequest(fd);
+                // 简单地轮询分配
 
-                // 从 epoll 监听中删除客户端事件
-                if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL) == -1)
+                // 在 Master 进程中将客户端套接字描述符发送给 Worker 进程
+                char ClientSocket_str[20] = {'\0'};
+                sprintf(ClientSocket_str, "%d", ClientSocket);
+
+                struct msghdr msg = {0};
+                struct iovec iov = {ClientSocket_str, strlen(ClientSocket_str)};
+                msg.msg_iov = &iov;
+                msg.msg_iovlen = 1;
+
+                // 在msg_control中添加文件描述符
+                char cmsgbuf[CMSG_SPACE(sizeof(int))] = {0};
+                msg.msg_control = cmsgbuf;
+                msg.msg_controllen = sizeof(cmsgbuf);
+
+                struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+                cmsg->cmsg_level = SOL_SOCKET;
+                cmsg->cmsg_type = SCM_RIGHTS;
+                cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+                *((int *)CMSG_DATA(cmsg)) = ClientSocket;
+
+                if (sendmsg(worker_sock_fd_[worker_index], &msg, 0) == -1)
                 {
-                    std::cerr << "Epoll control error in deleting client" << std::endl;
+                    std::cerr << "sendmsg error in master process" << std::endl;
+                    // 处理错误，重新发送
+                    if (sendmsg(worker_sock_fd_[worker_index], &msg, 0) == -1)
+                    {
+                        std::cerr << "Retry sendmsg failed: " << strerror(errno) << std::endl;
+                    }
                 }
 
-                close(fd);
+                std::cout << "New connection accepted. Assigned to Worker " << worker_index + 1 << std::endl;
+
+                worker_index = (worker_index + 1) % NumWorkers_;
             }
         }
     }
 
     free(EpollEvents);
+
+    // 等待所有Worker进程结束
+    for (pid_t pid : WorkerProcesses)
+    {
+        waitpid(pid, nullptr, 0);
+    }
 }
 
 void HttpProxy::ProxyRequest(int ClientSocket)
@@ -622,16 +793,21 @@ void StaticResourcesProxy::StaticResourcesProxyRequest(int ClientSocket, ServerB
         char FileBuffer[1024];
         int bytesRead = 0;
 
-        // 发送响应头
-        send(ClientSocket, response.c_str(), response.size(), 0);
-
-        // 发送文件内容
-        while ((bytesRead = File.readsome(FileBuffer, sizeof(FileBuffer))) > 0)
+        // 读取文件内容并添加到响应字符串
+        while (!File.eof())
         {
-            send(ClientSocket, FileBuffer, bytesRead, 0);
+            File.read(FileBuffer, sizeof(FileBuffer));
+            int bytesRead = File.gcount();
+            if (bytesRead > 0)
+            {
+                response.append(FileBuffer, bytesRead);
+            }
         }
 
         File.close();
+
+        // 将包含响应头和文件内容的字符串一次性发送到客户端
+        send(ClientSocket, response.c_str(), response.size(), 0);
 
         LogMap[Server.access_log].LogAcess(INFO, requestFromClient, response.c_str());
     }

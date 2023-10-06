@@ -12,7 +12,7 @@
 class HttpProxy
 {
 public:
-    HttpProxy(std::map<std::string, std::vector<ServerBlock>> ServerMap, std::vector<upstream> Upstreams);
+    HttpProxy(int NumWorkers, std::map<std::string, std::vector<ServerBlock>> ServerMap, std::vector<upstream> Upstreams);
 
     ~HttpProxy();
 
@@ -23,13 +23,19 @@ private:
     std::map<std::string, std::vector<ServerBlock>> ServerMap_;
     std::vector<int> ServerSockets_;
     std::vector<upstream> Upstreams_;
-    int epoll_fd;
+    std::vector<pid_t> WorkerProcesses;
+    std::vector<int> worker_sock_fd_;
+    int epoll_fd_master;
+    int NumWorkers_;
 
     // 初始化
     void Init();
 
     // 清除监听
     void CleanUp();
+
+    // Worker进程的函数
+    void WorkerFunction(int workerId, int worker_sock_fd);
 
     // 处理客户端发出的请求
     void ProxyRequest(int ClientSocket);

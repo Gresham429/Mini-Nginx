@@ -26,3 +26,9 @@ target_include_directories(Mini-Nginx
     http/include
     log/include
 )
+
+# 查找线程库
+find_package(Threads REQUIRED)
+
+# 链接线程库到可执行文件
+target_link_libraries(Mini-Nginx Threads::Threads)

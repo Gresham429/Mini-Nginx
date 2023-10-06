@@ -49,6 +49,10 @@ struct http
 {
     std::vector<ServerBlock> Servers;
     std::vector<upstream> Upstreams;
+    int NumWorkers;
+
+    http()
+        : NumWorkers(4) {}
 };
 
 http ParserConf(const std::string &FileName);

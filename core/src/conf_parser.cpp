@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <regex>
+#include <thread>
 
 // 解析配置文件
 http ParserConf(const std::string &FileName)
@@ -45,11 +46,19 @@ http ParserConf(const std::string &FileName)
             continue;
         }
 
+        if (line.find("worker_processes") != std::string::npos)
+        {
+            line.substr(17);
+            if (line.find("auto")) HttpServers.NumWorkers = std::thread::hardware_concurrency();
+            else HttpServers.NumWorkers = std::stoi(line);
+        }
+
         std::regex LocationRegex("location\\s+(.*?)\\s*\\{");
         std::smatch LocationMatch;
 
         std::regex UpstreamRegex("upstream\\s+(.*?)\\s*\\{");
         std::smatch UpstreamMatch;
+
         // 如果包含左花括号 '{'，说明进入了一个配置块
         if (line.find("{") != std::string::npos)
         {

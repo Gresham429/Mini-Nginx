@@ -45,7 +45,7 @@ int main()
         }
     }
 
-    HttpProxy HttpProxy_(ServerMap, Upstreams);
+    HttpProxy HttpProxy_(HttpServers.NumWorkers, ServerMap, Upstreams);
     HttpProxy_.Start();
 
     return 0;
