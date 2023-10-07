@@ -430,24 +430,24 @@ private:
 支持轮询、加权轮询、IP哈希三种负载均衡
 
 ```nginx
-	upstream backend1 {
-        server 127.0.0.1:8000;
-        server 127.0.0.1:8001;
-        server 127.0.0.1:8002;
-    }
+upstream backend1 {
+    server 127.0.0.1:8000;
+    server 127.0.0.1:8001;
+    server 127.0.0.1:8002;
+}
 
-    upstream backend2 {
-        ip_hash;
-        server 127.0.0.1:8000;
-        server 127.0.0.1:8001;
-        server 127.0.0.1:8002;
-    }
+upstream backend2 {
+    ip_hash;
+    server 127.0.0.1:8000;
+    server 127.0.0.1:8001;
+    server 127.0.0.1:8002;
+}
 
-    upstream backend3 {
-        server 127.0.0.1:8000 weight=2;
-        server 127.0.0.1:8001 weight=7;
-        server 127.0.0.1:8002 weight=1;
-    }
+upstream backend3 {
+    server 127.0.0.1:8000 weight=2;
+    server 127.0.0.1:8001 weight=7;
+    server 127.0.0.1:8002 weight=1;
+}
 ```
 
 
