@@ -48,8 +48,8 @@ http ParserConf(const std::string &FileName)
 
         if (line.find("worker_processes") != std::string::npos)
         {
-            line.substr(17);
-            if (line.find("auto")) HttpServers.NumWorkers = std::thread::hardware_concurrency();
+            line = line.substr(17);
+            if (line.find("auto") != std::string::npos) HttpServers.NumWorkers = std::thread::hardware_concurrency();
             else HttpServers.NumWorkers = std::stoi(line);
         }
 
@@ -153,9 +153,13 @@ http ParserConf(const std::string &FileName)
             {
                 CurrentLocationBlock.proxy_pass = line.substr(11); // 去掉 "proxy_pass " 部分
             }
+            else if (line.find("proxy_http_version") == 0)
+            {
+                CurrentLocationBlock.proxy_http_version = line.substr(19); // 去掉 "proxy_http_version " 部分
+            }
             else if (line.find("proxy_set_header") == 0)
             {
-                CurrentLocationBlock.proxy_set_header = line.substr(17); // 去掉 "root " 部分
+                CurrentLocationBlock.proxy_set_header = line.substr(17); // 去掉 "proxy_set_header " 部分
             }
             else if (line.find("root") == 0)
             {

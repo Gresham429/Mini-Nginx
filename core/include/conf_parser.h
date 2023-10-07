@@ -15,12 +15,13 @@ struct LocationBlock
 {
     std::string path;
     std::string proxy_pass;
+    std::string proxy_http_version;
     std::string proxy_set_header;
     std::string root;
     std::string index;
 
     LocationBlock()
-        : path(""), proxy_pass(""), proxy_set_header(""), root(""), index("index.html") {}
+        : path(""), proxy_pass(""), proxy_http_version(""), proxy_set_header(""), root(""), index("index.html") {}
 };
 
 struct ServerBlock
