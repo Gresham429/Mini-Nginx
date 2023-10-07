@@ -17,6 +17,7 @@
 #include <random>
 #include <functional>
 #include <sys/wait.h>
+#include <openssl/sha.h>
 
 extern std::map<std::string, Logger> LogMap;
 
@@ -630,6 +631,33 @@ void HttpProxy::LoadBalancingWeightRoundRobin(std::vector<std::string> Servers, 
     }
 }
 
+// 计算字符串的SHA-256哈希值
+std::string CalculateSHA256Hash(const std::string &input)
+{
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256_CTX sha256;
+    SHA256_Init(&sha256);
+    SHA256_Update(&sha256, input.c_str(), input.size());
+    SHA256_Final(hash, &sha256);
+
+    char hexHash[2 * SHA256_DIGEST_LENGTH + 1];
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+    {
+        sprintf(&hexHash[i * 2], "%02x", hash[i]);
+    }
+
+    return hexHash;
+}
+
+// 将十六进制字符串转换为整数
+unsigned int HexStringToInt(const std::string &hexStr)
+{
+    std::istringstream iss(hexStr.substr(0, 6));
+    unsigned int result;
+    iss >> std::hex >> result;
+    return result;
+}
+
 // IP哈希
 void HttpProxy::LoadBalancingIPHash(std::vector<std::string> Servers, std::string &ProxyPass, int ClientSocket)
 {
@@ -643,11 +671,10 @@ void HttpProxy::LoadBalancingIPHash(std::vector<std::string> Servers, std::strin
         inet_ntop(AF_INET, &(clientAddr.sin_addr), ClientIP, INET_ADDRSTRLEN);
 
         // 使用哈希函数计算客户端IP地址的哈希值
-        std::hash<char *> HashFunction;
-        size_t HashValue = HashFunction(ClientIP);
+        std::string HashValue = CalculateSHA256Hash(ClientIP);
 
         // 使用哈希值来选择服务器
-        size_t ServerIndex = HashValue % Servers.size();
+        size_t ServerIndex = HexStringToInt(HashValue) % Servers.size();
         ProxyPass = Servers[ServerIndex];
     }
 }

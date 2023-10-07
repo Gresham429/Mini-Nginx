@@ -32,3 +32,13 @@ find_package(Threads REQUIRED)
 
 # 链接线程库到可执行文件
 target_link_libraries(Mini-Nginx Threads::Threads)
+
+# 查找OpenSSL库
+find_package(OpenSSL REQUIRED)
+
+# 添加OpenSSL的包含目录和库目录
+include_directories(${OPENSSL_INCLUDE_DIR})
+link_directories(${OPENSSL_LIBRARY_DIR})
+
+# 链接OpenSSL库
+target_link_libraries(Mini-Nginx OpenSSL::SSL OpenSSL::Crypto)
