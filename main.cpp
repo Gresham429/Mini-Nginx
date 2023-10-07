@@ -7,7 +7,6 @@
 
 std::map<std::string, Logger> LogMap;
 
-
 int main()
 {
     std::string filename;
